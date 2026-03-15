@@ -8,10 +8,13 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: false   # jmdict.db 直接包含在仓库中
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,7 +24,9 @@ jobs:
       - name: Cache Buildozer global directory
         uses: actions/cache@v4
         with:
-          path: ~/.buildozer
+          path: |
+            ~/.buildozer
+            ~/.android
           key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             buildozer-${{ runner.os }}-
@@ -34,21 +39,48 @@ jobs:
             python3-pip autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev \
             libtinfo5 cmake libffi-dev libssl-dev \
-            ccache libsqlite3-dev lld
+            ccache libsqlite3-dev lld build-essential
 
-      - name: Install buildozer & dependencies
+      - name: Install buildozer & Cython
         run: |
           pip install --upgrade pip
           pip install buildozer cython==0.29.36
 
-      - name: Set up Android SDK/NDK via buildozer
+      - name: Verify dictionary file
         run: |
-          cd apk
-          buildozer android debug 2>&1 | tail -100
+          echo "词典文件大小："
+          ls -lh jmdict.db
+          python3 -c "
+          import sqlite3
+          conn = sqlite3.connect('jmdict.db')
+          c = conn.cursor()
+          c.execute('SELECT COUNT(*) FROM entries')
+          print(f'词典词条数: {c.fetchone()[0]}')
+          conn.close()
+          "
 
-      - name: Upload APK artifact
+      - name: Build APK with Buildozer
+        run: |
+          buildozer android debug 2>&1 | tee build.log | tail -80
+
+      - name: Show build result
+        if: always()
+        run: |
+          echo "=== APK 文件 ==="
+          find bin/ -name "*.apk" 2>/dev/null && ls -lh bin/*.apk || echo "未找到 APK"
+          echo "=== 构建日志末尾 ==="
+          tail -30 build.log || true
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: japanese-vocab-apk
-          path: apk/bin/*.apk
+          name: japanese-vocab-apk-v2
+          path: bin/*.apk
           if-no-files-found: warn
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log

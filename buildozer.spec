@@ -3,9 +3,10 @@ title = 日语单词本
 package.name = japanesevocab
 package.domain = com.sanelius2
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,json
-version = 1.0.0
-requirements = python3,kivy==2.3.0,kivymd
+source.include_exts = py,db
+source.include_patterns = jmdict.db,dict_core.py
+version = 2.0.0
+requirements = python3,kivy==2.3.0
 orientation = portrait
 fullscreen = 0
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
