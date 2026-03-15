@@ -6,20 +6,6 @@
 内嵌 JMdict 词典（21万词条），查不到时联网补充。
 """
 
-from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
-from kivy.uix.popup import Popup
-from kivy.uix.togglebutton import ToggleButton
-from kivy.core.window import Window
-from kivy.metrics import dp, sp
-from kivy.utils import get_color_from_hex
-from kivy.clock import Clock
-from kivy.core.text import LabelBase
 import json
 import csv
 import os
@@ -28,7 +14,7 @@ import threading
 import random
 import sys
 
-# ── 注册 CJK 字体（解决中日文方块乱码）──
+# ── 查找 APK 内打包资源的通用函数（必须在 kivy import 之前定义）──
 def _find_asset(filename):
     """在多个可能路径里查找 APK 内打包的资源文件"""
     candidates = []
@@ -48,12 +34,45 @@ def _find_asset(filename):
             return p
     return None
 
+# ── 必须在任何 kivy.uix import 之前设置字体，否则 Widget 默认字体已缓存 ──
 _FONT_PATH = _find_asset("NotoSansCJK.ttf")
+
+# 用 kivy 的全局 kv 规则批量覆盖所有 Widget 的默认字体
+# 这是最彻底的方式，覆盖 Label / Button / TextInput / ToggleButton / Popup 标题等
+if _FONT_PATH:
+    from kivy.lang import Builder
+    _KV_FONT = _FONT_PATH.replace("\\", "/")  # Windows 路径兼容
+    Builder.load_string(f"""
+<Label>:
+    font_name: '{_KV_FONT}'
+<Button>:
+    font_name: '{_KV_FONT}'
+<TextInput>:
+    font_name: '{_KV_FONT}'
+<ToggleButton>:
+    font_name: '{_KV_FONT}'
+""")
+
+from kivy.app import App
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.textinput import TextInput
+from kivy.uix.popup import Popup
+from kivy.uix.togglebutton import ToggleButton
+from kivy.core.window import Window
+from kivy.metrics import dp, sp
+from kivy.utils import get_color_from_hex
+from kivy.clock import Clock
+from kivy.core.text import LabelBase
+
+# 同时注册 LabelBase（双保险）
 if _FONT_PATH:
     LabelBase.register(name="NotoSansCJK", fn_regular=_FONT_PATH)
-    # 覆盖 Kivy 默认字体，让所有 Label/Button/TextInput 自动使用 CJK 字体
-    LabelBase.register(name="Roboto", fn_regular=_FONT_PATH)
-    LabelBase.register(name="RobotoMono", fn_regular=_FONT_PATH)
+    LabelBase.register(name="Roboto",      fn_regular=_FONT_PATH)
+    LabelBase.register(name="RobotoMono",  fn_regular=_FONT_PATH)
 
 # ── 词典模块 ──
 try:
@@ -136,6 +155,8 @@ def get_due(words):
 # ────────────────────────────────────────
 #  UI 工具
 # ────────────────────────────────────────
+_FN = _FONT_PATH or "Roboto"   # 字体名：有路径用路径，否则用系统默认
+
 def mkbtn(text, bg=None, fg=None, h=dp(46), **kw):
     b = Button(
         text=text,
@@ -143,6 +164,7 @@ def mkbtn(text, bg=None, fg=None, h=dp(46), **kw):
         background_color=bg or C_PRI,
         color=fg or C_WHT,
         font_size=sp(14),
+        font_name=_FN,
         **kw
     )
     return b
@@ -151,7 +173,9 @@ def mklbl(text, size=sp(13), color=None, bold=False, halign="left", **kw):
     color = color or C_TXT
     l = Label(
         text=text, font_size=size, color=color, bold=bold,
-        halign=halign, text_size=(None, None), **kw
+        halign=halign, text_size=(None, None),
+        font_name=_FN,
+        **kw
     )
     l.bind(size=lambda inst, v: setattr(inst, "text_size", (v[0], None)))
     return l
@@ -159,7 +183,7 @@ def mklbl(text, size=sp(13), color=None, bold=False, halign="left", **kw):
 def show_toast(title, msg, ok_cb=None):
     box = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(8))
     box.add_widget(Label(
-        text=msg, font_size=sp(13), color=C_TXT,
+        text=msg, font_size=sp(13), color=C_TXT, font_name=_FN,
         text_size=(dp(260), None), size_hint_y=None, height=dp(72)))
     btn = mkbtn("确定", h=dp(42))
     box.add_widget(btn)
@@ -189,6 +213,7 @@ class NavBar(BoxLayout):
             btn = ToggleButton(
                 text=label, group="nav",
                 font_size=sp(12),
+                font_name=_FN,
                 background_color=C_PRI, color=C_WHT,
             )
             btn.bind(on_press=lambda b, s=sn: self._go(s))
@@ -223,7 +248,7 @@ class SearchScreen(Screen):
         row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
         self.search_input = TextInput(
             hint_text="输入日语单词（汉字/假名/罗马字）",
-            multiline=False, font_size=sp(15), size_hint_x=0.72)
+            multiline=False, font_size=sp(15), font_name=_FN, size_hint_x=0.72)
         self.search_input.bind(on_text_validate=self._do_search)
         row.add_widget(self.search_input)
         btn = mkbtn("查询", size_hint_x=0.28)
@@ -300,6 +325,7 @@ class SearchScreen(Screen):
         )
         lbl_hdr = Label(
             text=hdr_text, markup=True,
+            font_name=_FN,
             size_hint_y=None, height=dp(38),
             text_size=(Window.width - dp(30), None), halign="left")
         card.add_widget(lbl_hdr)
@@ -325,7 +351,7 @@ class SearchScreen(Screen):
             text=def_text,
             size_hint_y=None,
             text_size=(Window.width - dp(30), None),
-            halign="left", font_size=sp(12), color=C_TXT)
+            halign="left", font_size=sp(12), color=C_TXT, font_name=_FN)
         lbl_def.bind(texture_size=lambda inst, v: setattr(
             inst, "height", v[1] + dp(8)))
         card.add_widget(lbl_def)
@@ -334,7 +360,7 @@ class SearchScreen(Screen):
         row2 = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         note_inp = TextInput(
             hint_text="备注（可选）",
-            multiline=False, font_size=sp(12), size_hint_x=0.55)
+            multiline=False, font_size=sp(12), font_name=_FN, size_hint_x=0.55)
         row2.add_widget(note_inp)
         btn_add = mkbtn("➕ 加入生词本", size_hint_x=0.45, h=dp(44))
 
@@ -433,16 +459,16 @@ class VocabScreen(Screen):
             text=(f"[b][size={int(sp(16))}][color=1A237E]{wt}[/color][/size][/b]"
                   + (f"  [size={int(sp(12))}][color=5C6BC0]【{rdng}】[/color][/size]"
                      if rdng and rdng != wt else "")),
-            markup=True, halign="left",
+            markup=True, halign="left", font_name=_FN,
             text_size=(Window.width * 0.70, None), size_hint_y=0.5)
         info.add_widget(lbl_w)
         lbl_d = Label(text=defs, font_size=sp(11), color=C_GRY,
-                      halign="left",
+                      halign="left", font_name=_FN,
                       text_size=(Window.width * 0.70, None), size_hint_y=0.3)
         info.add_widget(lbl_d)
         lbl_r = Label(
             text=f"下次：{next_rev}  第{stage+1}阶",
-            font_size=sp(10), color=C_GRY, halign="left",
+            font_size=sp(10), color=C_GRY, halign="left", font_name=_FN,
             text_size=(Window.width * 0.70, None), size_hint_y=0.2)
         info.add_widget(lbl_r)
         row.add_widget(info)
@@ -555,7 +581,7 @@ class VocabScreen(Screen):
             size=sp(12), color=C_TXT))
         ti = TextInput(
             hint_text="例：/sdcard/Download/生词本_2024-01-01.json",
-            multiline=False, font_size=sp(12),
+            multiline=False, font_size=sp(12), font_name=_FN,
             size_hint_y=None, height=dp(44))
         box.add_widget(ti)
 
@@ -695,8 +721,8 @@ class CardScreen(Screen):
         # 模式 + 开始
         mrow = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
         b1 = ToggleButton(text="日→中", group="cmode",
-                          state="down", font_size=sp(13))
-        b2 = ToggleButton(text="中→日", group="cmode", font_size=sp(13))
+                          state="down", font_size=sp(13), font_name=_FN)
+        b2 = ToggleButton(text="中→日", group="cmode", font_size=sp(13), font_name=_FN)
         b1.bind(on_press=lambda *a: setattr(self, "card_mode", "jp2cn"))
         b2.bind(on_press=lambda *a: setattr(self, "card_mode", "cn2jp"))
         btn_start = mkbtn("🔀 随机开始")
