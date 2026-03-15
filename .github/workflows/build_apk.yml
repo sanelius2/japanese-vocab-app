@@ -8,13 +8,11 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          lfs: false   # jmdict.db 直接包含在仓库中
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,16 +44,26 @@ jobs:
           pip install --upgrade pip
           pip install buildozer cython==0.29.36
 
-      - name: Verify dictionary file
+      # ── 词典：下载 JMdict 并在本地构建 jmdict.db ──
+      - name: Download JMdict & build offline dictionary
         run: |
-          echo "词典文件大小："
+          echo "⬇️  下载 JMdict 多语言版..."
+          curl -L --retry 5 --retry-delay 10 \
+            -o JMdict.gz \
+            "http://ftp.edrdg.org/pub/Nihongo/JMdict.gz"
+          ls -lh JMdict.gz
+
+          echo "🔨 构建 SQLite 词典数据库..."
+          python3 build_dict.py
+
+          echo "✅ 词典构建完成："
           ls -lh jmdict.db
           python3 -c "
           import sqlite3
           conn = sqlite3.connect('jmdict.db')
           c = conn.cursor()
           c.execute('SELECT COUNT(*) FROM entries')
-          print(f'词典词条数: {c.fetchone()[0]}')
+          print(f'  词条数: {c.fetchone()[0]}')
           conn.close()
           "
 
@@ -74,7 +82,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: japanese-vocab-apk-v2
+          name: japanese-vocab-apk
           path: bin/*.apk
           if-no-files-found: warn
 

@@ -1,0 +1,13 @@
+# 词典数据库（69MB，由 CI 现场构建，不提交到仓库）
+jmdict.db
+JMdict.gz
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# Buildozer 产物
+.buildozer/
+bin/
+build.log
