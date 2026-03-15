@@ -19,6 +19,19 @@ jobs:
         with:
           python-version: '3.10'
 
+      # 必须在 buildozer 之前设置 Java，确保 JAVA_HOME 指向 temurin-17
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify Java version
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          javac -version
+
       - name: Cache Buildozer & Android SDK
         uses: actions/cache@v4
         with:
@@ -34,7 +47,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y \
             git zip unzip \
-            openjdk-17-jdk \
             python3-pip \
             autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev \
@@ -69,8 +81,13 @@ jobs:
 
       - name: Build APK with Buildozer
         run: |
+          # 用 readlink 确保 JAVA_HOME 指向 setup-java 设置的 Java 17
+          export JAVA_HOME="$(dirname $(dirname $(readlink -f $(which java))))"
+          echo "Using JAVA_HOME=$JAVA_HOME"
           buildozer -v android debug 2>&1 | tee build.log
-          echo "--- buildozer exit: $? ---"
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "--- buildozer exit: $BUILD_EXIT ---"
+          exit $BUILD_EXIT
 
       - name: Check APK output
         if: always()
@@ -79,8 +96,8 @@ jobs:
           find . -name "*.apk" 2>/dev/null || echo "未找到任何 APK"
           echo "=== bin/ 目录 ==="
           ls -lh bin/ 2>/dev/null || echo "bin/ 不存在"
-          echo "=== 日志末尾 150 行 ==="
-          tail -150 build.log || true
+          echo "=== 日志末尾 200 行 ==="
+          tail -200 build.log || true
 
       - name: Upload APK
         if: always()
