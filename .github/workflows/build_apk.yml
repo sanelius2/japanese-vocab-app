@@ -69,25 +69,27 @@ jobs:
 
       - name: Build APK with Buildozer
         run: |
-          buildozer android debug 2>&1 | tee build.log | tail -80
+          buildozer android debug 2>&1 | tee build.log
+          echo "exit code: $?"
 
       - name: Show build result
         if: always()
         run: |
           echo "=== APK 文件 ==="
-          find bin/ -name "*.apk" 2>/dev/null && ls -lh bin/*.apk || echo "未找到 APK"
-          echo "=== 构建日志末尾 ==="
-          tail -30 build.log || true
+          find . -name "*.apk" 2>/dev/null || echo "全局未找到任何 APK"
+          ls -lh bin/ 2>/dev/null || echo "bin/ 目录不存在"
+          echo "=== 构建日志末尾 100 行 ==="
+          tail -100 build.log || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: japanese-vocab-apk
           path: bin/*.apk
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: Upload build log (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
