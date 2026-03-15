@@ -3,8 +3,8 @@ title = 日语单词本
 package.name = japanesevocab
 package.domain = com.sanelius2
 source.dir = .
-source.include_exts = py,db
-source.include_patterns = jmdict.db,dict_core.py
+source.include_exts = py,db,ttf
+source.include_patterns = jmdict.db,dict_core.py,NotoSansCJK.ttf
 version = 2.0.0
 
 # requirements：kivy 完整依赖链

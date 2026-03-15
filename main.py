@@ -19,6 +19,7 @@ from kivy.core.window import Window
 from kivy.metrics import dp, sp
 from kivy.utils import get_color_from_hex
 from kivy.clock import Clock
+from kivy.core.text import LabelBase
 import json
 import csv
 import os
@@ -26,6 +27,14 @@ import datetime
 import threading
 import random
 import sys
+
+# ── 注册 CJK 字体（解决中日文方块乱码）──
+_FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NotoSansCJK.ttf")
+if os.path.exists(_FONT_PATH):
+    LabelBase.register(name="NotoSansCJK", fn_regular=_FONT_PATH)
+    # 覆盖 Kivy 默认字体，让所有 Label/Button/TextInput 自动使用 CJK 字体
+    LabelBase.register(name="Roboto", fn_regular=_FONT_PATH)
+    LabelBase.register(name="RobotoMono", fn_regular=_FONT_PATH)
 
 # ── 词典模块 ──
 try:
