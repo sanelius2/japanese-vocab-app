@@ -17,20 +17,38 @@ import urllib.parse
 import threading
 
 # ──────────────────────────────────────────────
-#  路径解析：支持 PyInstaller _MEIPASS 临时目录
+#  路径解析：同时支持 PyInstaller / Android / 桌面
 # ──────────────────────────────────────────────
 def _get_db_path():
+    candidates = []
+
+    # PyInstaller
     if hasattr(sys, '_MEIPASS'):
-        base = sys._MEIPASS
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
+        candidates.append(os.path.join(sys._MEIPASS, "jmdict.db"))
+
+    # Android: Kivy private data 目录（buildozer 打包的 .py/.db 文件在这里）
+    try:
+        from android.storage import app_storage_path  # type: ignore
+        candidates.append(os.path.join(app_storage_path(), "jmdict.db"))
+    except Exception:
+        pass
+
+    # Android: ANDROID_PRIVATE（Kivy 的 private 资源实际释放位置）
+    android_private = os.environ.get("ANDROID_PRIVATE", "")
+    if android_private:
+        candidates.append(os.path.join(android_private, "jmdict.db"))
+        candidates.append(os.path.join(android_private, "app", "jmdict.db"))
+
+    # 普通目录（桌面 / CI）
+    base = os.path.dirname(os.path.abspath(__file__))
+    candidates += [
         os.path.join(base, "jmdict.db"),
         os.path.join(base, "dict", "jmdict.db"),
         os.path.join(os.path.dirname(base), "jmdict.db"),
     ]
+
     for p in candidates:
-        if os.path.exists(p):
+        if p and os.path.exists(p):
             return p
     return None
 
@@ -359,15 +377,17 @@ def _pos_zh(pos):
     return _POS_ZH.get(pos, pos)
 
 # ──────────────────────────────────────────────
-#  DB 连接（线程安全单例）
+#  DB 连接（每次查询独立连接，Android 兼容）
 # ──────────────────────────────────────────────
-_db_conn = None
-
 def _get_conn():
-    global _db_conn
-    if _db_conn is None and DB_PATH:
-        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    return _db_conn
+    """返回一个新的只读连接，调用方负责 close()。Android 不适合全局单例。"""
+    if not DB_PATH:
+        return None
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        return conn
+    except Exception:
+        return None
 
 def _row_to_entry(row):
     eid, kanji_str, reading_str, meanings_json, is_common = row
@@ -406,36 +426,44 @@ def lookup_offline(keyword):
     conn = _get_conn()
     if conn is None:
         return []
-    c = conn.cursor()
-    results = []
-    seen = set()
+    try:
+        c = conn.cursor()
+        results = []
+        seen = set()
 
-    def _fetch(form):
-        c.execute(
-            "SELECT e.id,e.kanji,e.reading,e.meanings,e.is_common "
-            "FROM entries e JOIN kanji_idx k ON e.id=k.eid WHERE k.form=? LIMIT 5",
-            (form,))
-        rows = c.fetchall()
-        if not rows:
+        def _fetch(form):
             c.execute(
                 "SELECT e.id,e.kanji,e.reading,e.meanings,e.is_common "
-                "FROM entries e JOIN reading_idx r ON e.id=r.eid WHERE r.form=? LIMIT 5",
+                "FROM entries e JOIN kanji_idx k ON e.id=k.eid WHERE k.form=? LIMIT 5",
                 (form,))
             rows = c.fetchall()
-        return rows
+            if not rows:
+                c.execute(
+                    "SELECT e.id,e.kanji,e.reading,e.meanings,e.is_common "
+                    "FROM entries e JOIN reading_idx r ON e.id=r.eid WHERE r.form=? LIMIT 5",
+                    (form,))
+                rows = c.fetchall()
+            return rows
 
-    for row in _fetch(keyword):
-        if row[0] not in seen:
-            seen.add(row[0]); results.append(_row_to_entry(row))
+        for row in _fetch(keyword):
+            if row[0] not in seen:
+                seen.add(row[0]); results.append(_row_to_entry(row))
 
-    if not _is_japanese(keyword) and not results:
-        hira = romaji_to_hiragana(keyword)
-        if hira != keyword:
-            for row in _fetch(hira):
-                if row[0] not in seen:
-                    seen.add(row[0]); results.append(_row_to_entry(row))
+        if not _is_japanese(keyword) and not results:
+            hira = romaji_to_hiragana(keyword)
+            if hira != keyword:
+                for row in _fetch(hira):
+                    if row[0] not in seen:
+                        seen.add(row[0]); results.append(_row_to_entry(row))
 
-    return results[:5]
+        return results[:5]
+    except Exception:
+        return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 # ──────────────────────────────────────────────
 #  在线查询（Jisho API）

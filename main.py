@@ -29,8 +29,27 @@ import random
 import sys
 
 # ── 注册 CJK 字体（解决中日文方块乱码）──
-_FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NotoSansCJK.ttf")
-if os.path.exists(_FONT_PATH):
+def _find_asset(filename):
+    """在多个可能路径里查找 APK 内打包的资源文件"""
+    candidates = []
+    # Android: ANDROID_PRIVATE 是 Kivy 释放 .py/.db/.ttf 的目录
+    android_private = os.environ.get("ANDROID_PRIVATE", "")
+    if android_private:
+        candidates.append(os.path.join(android_private, filename))
+        candidates.append(os.path.join(android_private, "app", filename))
+    # 普通 __file__ 同级目录
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(base, filename))
+    except Exception:
+        pass
+    for p in candidates:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+_FONT_PATH = _find_asset("NotoSansCJK.ttf")
+if _FONT_PATH:
     LabelBase.register(name="NotoSansCJK", fn_regular=_FONT_PATH)
     # 覆盖 Kivy 默认字体，让所有 Label/Button/TextInput 自动使用 CJK 字体
     LabelBase.register(name="Roboto", fn_regular=_FONT_PATH)
@@ -50,8 +69,16 @@ except ImportError:
 try:
     from android.storage import app_storage_path  # type: ignore
     _DATA_DIR = app_storage_path()
-except ImportError:
-    _DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+except Exception:
+    # 回退到 ANDROID_PRIVATE 或 __file__ 同级目录
+    _android_private = os.environ.get("ANDROID_PRIVATE", "")
+    if _android_private and os.path.isdir(_android_private):
+        _DATA_DIR = _android_private
+    else:
+        try:
+            _DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+        except Exception:
+            _DATA_DIR = "."
 DATA_FILE = os.path.join(_DATA_DIR, "vocabulary.json")
 
 INTERVALS = [1, 2, 4, 7, 15, 30, 60]
@@ -226,17 +253,26 @@ class SearchScreen(Screen):
         self.result_box.clear_widgets()
 
         def _cb(results, source, err):
+            # callback 可能在子线程里调用，必须用 Clock 切回主线程再更新 UI
             src_tag = "（离线）" if source == "offline" else "（联网）" if source == "online" else ""
             if not results:
                 Clock.schedule_once(lambda dt: setattr(
                     self.status_lbl, "text", f"未找到：{err or '无结果'}"))
                 return
-            Clock.schedule_once(lambda dt: setattr(
-                self.status_lbl, "text",
-                f"找到 {len(results)} 条 {src_tag}"))
-            Clock.schedule_once(lambda dt: self._show_results(results))
+            def _update(dt, r=results, st=src_tag):
+                self.status_lbl.text = f"找到 {len(r)} 条 {st}"
+                self._show_results(r)
+            Clock.schedule_once(_update)
 
-        lookup(kw, _cb)
+        # 离线查询放到子线程，避免主线程读 DB 卡顿导致 ANR
+        def _run():
+            try:
+                lookup(kw, _cb)
+            except Exception as e:
+                Clock.schedule_once(lambda dt, ex=e: setattr(
+                    self.status_lbl, "text", f"查询出错：{ex}"))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _show_results(self, results):
         self.result_box.clear_widgets()
