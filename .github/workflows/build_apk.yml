@@ -14,12 +14,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Cache Buildozer global directory
+      - name: Cache Buildozer & Android SDK
         uses: actions/cache@v4
         with:
           path: |
@@ -33,60 +33,62 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
-            git zip unzip openjdk-17-jdk \
-            python3-pip autoconf libtool pkg-config \
+            git zip unzip \
+            openjdk-17-jdk \
+            python3-pip \
+            autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev \
-            libtinfo5 cmake libffi-dev libssl-dev \
-            ccache libsqlite3-dev lld build-essential
+            cmake libffi-dev libssl-dev \
+            ccache libsqlite3-dev \
+            lld build-essential \
+            libltdl-dev
 
       - name: Install buildozer & Cython
         run: |
-          pip install --upgrade pip
-          pip install buildozer cython==0.29.36
+          pip install --upgrade pip wheel setuptools
+          pip install buildozer==1.5.0 cython==0.29.36
 
-      # ── 词典：下载 JMdict 并在本地构建 jmdict.db ──
       - name: Download JMdict & build offline dictionary
         run: |
-          echo "⬇️  下载 JMdict 多语言版..."
+          echo "⬇️  下载 JMdict..."
           curl -L --retry 5 --retry-delay 10 \
             -o JMdict.gz \
             "http://ftp.edrdg.org/pub/Nihongo/JMdict.gz"
           ls -lh JMdict.gz
 
-          echo "🔨 构建 SQLite 词典数据库..."
+          echo "🔨 构建词典数据库..."
           python3 build_dict.py
 
-          echo "✅ 词典构建完成："
           ls -lh jmdict.db
           python3 -c "
           import sqlite3
           conn = sqlite3.connect('jmdict.db')
-          c = conn.cursor()
-          c.execute('SELECT COUNT(*) FROM entries')
-          print(f'  词条数: {c.fetchone()[0]}')
+          print('词条数:', conn.execute('SELECT COUNT(*) FROM entries').fetchone()[0])
           conn.close()
           "
 
       - name: Build APK with Buildozer
         run: |
-          buildozer android debug 2>&1 | tee build.log
-          echo "exit code: $?"
+          buildozer -v android debug 2>&1 | tee build.log
+          echo "--- buildozer exit: $? ---"
 
-      - name: Show build result
+      - name: Check APK output
         if: always()
         run: |
-          echo "=== APK 文件 ==="
-          find . -name "*.apk" 2>/dev/null || echo "全局未找到任何 APK"
-          ls -lh bin/ 2>/dev/null || echo "bin/ 目录不存在"
-          echo "=== 构建日志末尾 100 行 ==="
-          tail -100 build.log || true
+          echo "=== 查找 APK ==="
+          find . -name "*.apk" 2>/dev/null || echo "未找到任何 APK"
+          echo "=== bin/ 目录 ==="
+          ls -lh bin/ 2>/dev/null || echo "bin/ 不存在"
+          echo "=== 日志末尾 150 行 ==="
+          tail -150 build.log || true
 
       - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: japanese-vocab-apk
           path: bin/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload build log (always)
         if: always()
@@ -94,3 +96,4 @@ jobs:
         with:
           name: build-log
           path: build.log
+          if-no-files-found: warn
