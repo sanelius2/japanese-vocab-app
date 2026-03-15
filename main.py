@@ -20,6 +20,7 @@ from kivy.metrics import dp, sp
 from kivy.utils import get_color_from_hex
 from kivy.clock import Clock
 import json
+import csv
 import os
 import datetime
 import threading
@@ -334,12 +335,19 @@ class VocabScreen(Screen):
     def _build(self):
         root = BoxLayout(orientation="vertical",
                          padding=dp(10), spacing=dp(8))
+        # 标题行
         tb = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
         tb.add_widget(mklbl("📚 我的生词本", size=sp(16), bold=True,
-                             size_hint_x=0.6))
-        btn_r = mkbtn("🔄", size_hint_x=0.2)
+                             size_hint_x=0.45))
+        btn_r = mkbtn("🔄", size_hint_x=0.18)
         btn_r.bind(on_press=lambda *a: self._refresh())
         tb.add_widget(btn_r)
+        btn_exp = mkbtn("📤导出", size_hint_x=0.18)
+        btn_exp.bind(on_press=lambda *a: self._export_popup())
+        tb.add_widget(btn_exp)
+        btn_imp = mkbtn("📥导入", size_hint_x=0.18)
+        btn_imp.bind(on_press=lambda *a: self._import_popup())
+        tb.add_widget(btn_imp)
         root.add_widget(tb)
 
         scroll = ScrollView()
@@ -408,6 +416,218 @@ class VocabScreen(Screen):
             self.words_ref[0] = words
             show_toast("已删除", f"「{wt}」已从生词本删除")
             self._refresh()
+
+    # ── 导出 ──────────────────────────────
+    def _export_popup(self):
+        words = load_data()
+        if not words:
+            show_toast("提示", "生词本为空，无法导出"); return
+
+        box = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
+        box.add_widget(mklbl(f"共 {len(words)} 个单词，选择格式：",
+                             size=sp(13), color=C_TXT))
+        pop = Popup(title="导出生词本",
+                    size_hint=(0.9, None), height=dp(240))
+
+        def _do(fmt):
+            pop.dismiss()
+            if fmt == "json":
+                self._export_json(words)
+            else:
+                self._export_csv(words)
+
+        btn_j = mkbtn("📋 JSON（完整数据，可再导入）")
+        btn_j.bind(on_press=lambda *a: _do("json"))
+        btn_c = mkbtn("📊 CSV（表格，可用 Excel 打开）")
+        btn_c.bind(on_press=lambda *a: _do("csv"))
+        btn_cancel = mkbtn("取消", bg=get_color_from_hex("#9E9E9E"))
+        btn_cancel.bind(on_press=lambda *a: pop.dismiss())
+
+        box.add_widget(btn_j)
+        box.add_widget(btn_c)
+        box.add_widget(btn_cancel)
+        pop.content = box
+        pop.open()
+
+    def _export_json(self, words):
+        # Android 导出到 Downloads 目录或应用目录
+        try:
+            from android.storage import primary_external_storage_path  # type: ignore
+            export_dir = os.path.join(primary_external_storage_path(), "Download")
+        except ImportError:
+            export_dir = _DATA_DIR
+        os.makedirs(export_dir, exist_ok=True)
+        fname = f"生词本_{datetime.date.today().isoformat()}.json"
+        path  = os.path.join(export_dir, fname)
+        data  = {
+            "app":      "日语单词本",
+            "version":  "1.0",
+            "exported": datetime.datetime.now().isoformat(timespec="seconds"),
+            "count":    len(words),
+            "words":    words,
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        show_toast("导出成功", f"已导出 {len(words)} 个单词\n{path}")
+
+    def _export_csv(self, words):
+        try:
+            from android.storage import primary_external_storage_path  # type: ignore
+            export_dir = os.path.join(primary_external_storage_path(), "Download")
+        except ImportError:
+            export_dir = _DATA_DIR
+        os.makedirs(export_dir, exist_ok=True)
+        fname = f"生词本_{datetime.date.today().isoformat()}.csv"
+        path  = os.path.join(export_dir, fname)
+        headers = ["单词","读音","释义","词性","JLPT","备注",
+                   "添加日期","复习阶段","复习次数","下次复习"]
+        with open(path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for w in words:
+                m0 = (w.get("meanings") or [{}])[0]
+                writer.writerow([
+                    w.get("word",""),
+                    w.get("reading",""),
+                    m0.get("defs",""),
+                    m0.get("pos",""),
+                    "·".join(w.get("jlpt",[])),
+                    w.get("note",""),
+                    w.get("add_date",""),
+                    w.get("review_stage",0)+1,
+                    w.get("review_count",0),
+                    w.get("next_review","") or "已掌握",
+                ])
+        show_toast("导出成功", f"已导出 {len(words)} 个单词\n{path}")
+
+    # ── 导入 ──────────────────────────────
+    def _import_popup(self):
+        """Android 上让用户输入文件名（JSON/CSV）"""
+        box = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(8))
+        box.add_widget(mklbl(
+            "输入文件完整路径（支持 .json / .csv）\n"
+            "或将文件放入下载目录后只填文件名：",
+            size=sp(12), color=C_TXT))
+        ti = TextInput(
+            hint_text="例：/sdcard/Download/生词本_2024-01-01.json",
+            multiline=False, font_size=sp(12),
+            size_hint_y=None, height=dp(44))
+        box.add_widget(ti)
+
+        pop = Popup(title="导入生词本",
+                    size_hint=(0.92, None), height=dp(260))
+
+        def _do(*a):
+            path = ti.text.strip()
+            if not path:
+                show_toast("提示", "请输入文件路径"); return
+            # 如果只写文件名，自动补全下载目录
+            if not os.path.isabs(path):
+                try:
+                    from android.storage import primary_external_storage_path  # type: ignore
+                    dl = os.path.join(primary_external_storage_path(), "Download")
+                except ImportError:
+                    dl = _DATA_DIR
+                path = os.path.join(dl, path)
+            pop.dismiss()
+            if not os.path.exists(path):
+                show_toast("错误", f"文件不存在：\n{path}"); return
+            ext = os.path.splitext(path)[1].lower()
+            if ext == ".json":
+                self._import_json(path)
+            elif ext == ".csv":
+                self._import_csv_file(path)
+            else:
+                show_toast("格式错误", "仅支持 .json 或 .csv 文件")
+
+        btn_ok = mkbtn("确认导入")
+        btn_ok.bind(on_press=_do)
+        btn_cancel = mkbtn("取消", bg=get_color_from_hex("#9E9E9E"))
+        btn_cancel.bind(on_press=lambda *a: pop.dismiss())
+        box.add_widget(btn_ok)
+        box.add_widget(btn_cancel)
+        pop.content = box
+        pop.open()
+
+    def _import_json(self, path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            show_toast("读取失败", str(e)); return
+        if isinstance(data, dict):
+            new_words = data.get("words", [])
+        elif isinstance(data, list):
+            new_words = data
+        else:
+            show_toast("格式错误", "JSON 格式不正确"); return
+        self._do_merge(new_words, path)
+
+    def _import_csv_file(self, path):
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                rows = list(csv.DictReader(f))
+        except UnicodeDecodeError:
+            try:
+                with open(path, "r", encoding="gbk") as f:
+                    rows = list(csv.DictReader(f))
+            except Exception as e:
+                show_toast("读取失败", str(e)); return
+        except Exception as e:
+            show_toast("读取失败", str(e)); return
+
+        new_words = []
+        for row in rows:
+            word = row.get("单词", "").strip()
+            if not word:
+                continue
+            entry = {
+                "word":    word,
+                "reading": row.get("读音","").strip(),
+                "meanings": [{"pos":  row.get("词性","").strip(),
+                               "defs": row.get("释义","").strip(),
+                               "defs_en": ""}],
+                "jlpt":    [x.strip() for x in row.get("JLPT","").split("·") if x.strip()],
+                "note":    row.get("备注","").strip(),
+                "add_date":      row.get("添加日期", datetime.date.today().isoformat()),
+                "review_stage":  max(0, int(row.get("复习阶段",1) or 1) - 1),
+                "review_count":  int(row.get("复习次数",0) or 0),
+                "next_review":   row.get("下次复习","").strip() or
+                                 (datetime.date.today()+datetime.timedelta(days=1)).isoformat(),
+            }
+            if entry["next_review"] == "已掌握":
+                entry["next_review"] = None
+            new_words.append(entry)
+        self._do_merge(new_words, path)
+
+    def _do_merge(self, new_words, path):
+        words = load_data()
+        existing = {w.get("word","") for w in words}
+        added, skipped = [], []
+        for w in new_words:
+            wt = w.get("word","")
+            if wt and wt in existing:
+                skipped.append(wt)
+            else:
+                w.setdefault("add_date", datetime.date.today().isoformat())
+                w.setdefault("review_stage", 0)
+                w.setdefault("review_count", 0)
+                if not w.get("next_review"):
+                    w["next_review"] = (
+                        datetime.date.today() +
+                        datetime.timedelta(days=INTERVALS[w.get("review_stage",0)])
+                    ).isoformat()
+                words.append(w)
+                existing.add(wt)
+                added.append(wt)
+        if added:
+            save_data(words)
+            self.words_ref[0] = words
+            self._refresh()
+        msg = f"✅ 新增 {len(added)} 个"
+        if skipped:
+            msg += f"\n⏭ 跳过 {len(skipped)} 个（已存在）"
+        show_toast("导入完成", msg)
 
 # ────────────────────────────────────────
 #  单词卡片页面
