@@ -4,6 +4,7 @@ package.name = japanesevocab
 package.domain = com.sanelius2
 source.dir = .
 source.include_exts = py,db,ttf
+# 明确列出所有需要打包的资源文件（相对于 source.dir 即 apk/ 目录）
 source.include_patterns = jmdict.db,dict_core.py,NotoSansCJK.ttf
 version = 2.0.0
 
