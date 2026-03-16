@@ -60,18 +60,22 @@ jobs:
           pip install --upgrade pip wheel setuptools
           pip install buildozer==1.5.0 cython==0.29.36
 
-      - name: Download JMdict & build offline dictionary
+      - name: Build offline dictionary (skip if jmdict.db already exists)
         run: |
-          echo "⬇️  下载 JMdict..."
-          curl -L --retry 5 --retry-delay 10 \
-            -o JMdict.gz \
-            "http://ftp.edrdg.org/pub/Nihongo/JMdict.gz"
-          ls -lh JMdict.gz
+          if [ -f "jmdict.db" ]; then
+            echo "✅ jmdict.db 已存在（来自新时代日汉词典），跳过重建"
+            ls -lh jmdict.db
+          else
+            echo "⬇️  下载 JMdict..."
+            curl -L --retry 5 --retry-delay 10 \
+              -o JMdict.gz \
+              "http://ftp.edrdg.org/pub/Nihongo/JMdict.gz"
+            ls -lh JMdict.gz
+            echo "🔨 构建词典数据库..."
+            python3 build_dict.py
+            ls -lh jmdict.db
+          fi
 
-          echo "🔨 构建词典数据库..."
-          python3 build_dict.py
-
-          ls -lh jmdict.db
           python3 -c "
           import sqlite3
           conn = sqlite3.connect('jmdict.db')

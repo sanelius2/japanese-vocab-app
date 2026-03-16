@@ -1,5 +1,4 @@
-# 词典数据库（69MB，由 CI 现场构建，不提交到仓库）
-jmdict.db
+# JMdict 原始 XML（由 CI 下载，不提交）
 JMdict.gz
 
 # Python 缓存
